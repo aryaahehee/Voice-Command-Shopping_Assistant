@@ -184,7 +184,8 @@ export class VoiceService {
 
     if (qtyUnitRx) {
       const rawQty = qtyUnitRx[1].trim();
-      quantity = W2N[rawQty] ?? parseFloat(rawQty) || 1;
+      const parsedQty = W2N[rawQty] ?? parseFloat(rawQty);
+      quantity = Number.isNaN(parsedQty) ? 1 : parsedQty;
       unit = this.normaliseUnit(qtyUnitRx[2]) ?? "pcs";
       itemName = qtyUnitRx[3].trim();
     } else {

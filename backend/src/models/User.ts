@@ -97,7 +97,8 @@ const userSchema = new Schema<IUser, IUserModel>(
 );
 
 // ── Indexes ─────────────────────────────────────────────────
-userSchema.index({ email: 1 }, { unique: true });
+// Note: the email field already carries unique: true in the schema definition,
+// which creates the index automatically. We only add the extra index here.
 userSchema.index({ createdAt: -1 });
 
 // ── Pre-save: hash password ──────────────────────────────────
