@@ -9,8 +9,12 @@ interface ProvidersProps {
 
 /**
  * Root providers wrapper.
- * Wraps the entire app with theme support and global toast notifications.
- * Additional providers (auth, query client, etc.) will be added in later milestones.
+ * - ThemeProvider (next-themes) for dark/light/system
+ * - react-hot-toast global outlet
+ *
+ * Note: react-speech-recognition does NOT need a provider —
+ * it hooks into the browser's Web Speech API directly.
+ * SpeechRecognition polyfill is loaded in useVoice on the client.
  */
 export function Providers({ children }: ProvidersProps) {
   return (
@@ -22,7 +26,6 @@ export function Providers({ children }: ProvidersProps) {
     >
       {children}
 
-      {/* Global toast notification outlet */}
       <Toaster
         position="bottom-right"
         toastOptions={{
@@ -35,16 +38,10 @@ export function Providers({ children }: ProvidersProps) {
             fontSize: "0.875rem",
           },
           success: {
-            iconTheme: {
-              primary: "hsl(142.1 76.2% 36.3%)",
-              secondary: "white",
-            },
+            iconTheme: { primary: "hsl(142.1 76.2% 36.3%)", secondary: "white" },
           },
           error: {
-            iconTheme: {
-              primary: "hsl(0 84.2% 60.2%)",
-              secondary: "white",
-            },
+            iconTheme: { primary: "hsl(0 84.2% 60.2%)", secondary: "white" },
           },
         }}
       />
