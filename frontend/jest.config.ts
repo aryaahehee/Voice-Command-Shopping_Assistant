@@ -11,7 +11,7 @@ const config: Config = {
   testEnvironment: "jsdom",
 
   // Custom matchers from @testing-library/jest-dom
-  setupFilesAfterFramework: ["<rootDir>/jest.setup.ts"],
+  setupFilesAfterEnv: ["<rootDir>/jest.setup.ts"],
 
   // Resolve @/* path aliases
   moduleNameMapper: {

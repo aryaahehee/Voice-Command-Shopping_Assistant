@@ -126,7 +126,8 @@ export type RecommendationSource =
   | "trending";
 
 export interface Recommendation {
-  _id: string;
+  _id?: string;
+  id?: string;
   itemName: string;
   category: ItemCategory;
   reason: string;
