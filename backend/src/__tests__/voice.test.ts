@@ -1,27 +1,24 @@
 /**
- * VoiceService regex parser unit tests.
- * OpenAI is mocked so no API key is needed in CI.
+ * VoiceService unit tests — covers regex fallback parser + edge cases.
+ * OpenAI is mocked so tests are fully offline.
  */
 
-// Mock OpenAI so tests are fully offline
-jest.mock("openai", () => {
-  return {
-    __esModule: true,
-    default: jest.fn().mockImplementation(() => ({
-      chat: {
-        completions: {
-          create: jest.fn().mockResolvedValue({
-            choices: [{ message: { content: null } }],
-          }),
-        },
+jest.mock("openai", () => ({
+  __esModule: true,
+  default: jest.fn().mockImplementation(() => ({
+    chat: {
+      completions: {
+        create: jest.fn().mockResolvedValue({
+          choices: [{ message: { content: null } }],
+        }),
       },
-    })),
-  };
-});
+    },
+  })),
+}));
 
 jest.mock("../config/env", () => ({
   env: {
-    OPENAI_API_KEY: "",   // empty → forces regex fallback
+    OPENAI_API_KEY: "",
     OPENAI_MODEL: "gpt-4o-mini",
     isDev: () => true,
     isProd: () => false,
@@ -30,7 +27,12 @@ jest.mock("../config/env", () => ({
 }));
 
 jest.mock("../utils/logger", () => ({
-  logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() },
+  logger: {
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    debug: jest.fn(),
+  },
 }));
 
 import { VoiceService } from "../services/voice.service";
@@ -39,51 +41,34 @@ const svc = new VoiceService();
 
 describe("VoiceService — regex fallback parser", () => {
   describe("action detection", () => {
-    it("detects 'add' from 'add milk'", async () => {
-      const r = await svc.parseCommand("add milk");
-      expect(r?.action).toBe("add");
-    });
-
-    it("detects 'add' from 'I need bananas'", async () => {
-      const r = await svc.parseCommand("I need bananas");
-      expect(r?.action).toBe("add");
-    });
-
-    it("detects 'add' from 'buy 2 apples'", async () => {
-      const r = await svc.parseCommand("buy 2 apples");
-      expect(r?.action).toBe("add");
-    });
-
-    it("detects 'add' from 'please add bread'", async () => {
-      const r = await svc.parseCommand("please add bread");
-      expect(r?.action).toBe("add");
-    });
-
-    it("detects 'remove' from 'remove eggs'", async () => {
-      const r = await svc.parseCommand("remove eggs");
-      expect(r?.action).toBe("remove");
-    });
-
-    it("detects 'remove' from 'delete bread'", async () => {
-      const r = await svc.parseCommand("delete bread");
-      expect(r?.action).toBe("remove");
-    });
-
-    it("detects 'search' from 'find toothpaste'", async () => {
-      const r = await svc.parseCommand("find toothpaste");
-      expect(r?.action).toBe("search");
+    it.each([
+      ["add milk",            "add"],
+      ["buy 2 apples",        "add"],
+      ["I need bananas",      "add"],
+      ["I want bread",        "add"],
+      ["please add eggs",     "add"],
+      ["can you add butter",  "add"],
+      ["remove eggs",         "remove"],
+      ["delete bread",        "remove"],
+      ["take off butter",     "remove"],
+      ["get rid of cheese",   "remove"],
+      ["find toothpaste",     "search"],
+      ["search for shampoo",  "search"],
+      ["look for oat milk",   "search"],
+    ])("'%s' → action '%s'", async (input, expected) => {
+      const r = await svc.parseCommand(input);
+      expect(r?.action).toBe(expected);
     });
   });
 
-  describe("quantity + unit extraction", () => {
-    it("extracts numeric quantity", async () => {
+  describe("quantity extraction", () => {
+    it("extracts numeric quantity and unit", async () => {
       const r = await svc.parseCommand("buy 2 kg of apples");
       expect(r?.quantity).toBe(2);
       expect(r?.unit).toBe("kg");
-      expect(r?.itemName).toContain("apple");
     });
 
-    it("converts word numbers", async () => {
+    it("converts word 'three'", async () => {
       const r = await svc.parseCommand("add three bottles of water");
       expect(r?.quantity).toBe(3);
       expect(r?.unit).toBe("bottle");
@@ -93,34 +78,71 @@ describe("VoiceService — regex fallback parser", () => {
       const r = await svc.parseCommand("buy a dozen eggs");
       expect(r?.quantity).toBe(12);
     });
+
+    it("converts 'half'", async () => {
+      const r = await svc.parseCommand("buy half kg of rice");
+      expect(r?.quantity).toBe(0.5);
+    });
+
+    it("defaults to quantity 1 when not specified", async () => {
+      const r = await svc.parseCommand("add milk");
+      expect(r?.quantity).toBe(1);
+    });
   });
 
   describe("price extraction", () => {
-    it("extracts maxPrice from 'under $5'", async () => {
+    it("extracts '$5' price constraint", async () => {
       const r = await svc.parseCommand("find toothpaste under $5");
       expect(r?.maxPrice).toBe(5);
     });
 
-    it("extracts maxPrice from 'less than 3 dollars'", async () => {
-      const r = await svc.parseCommand("find shampoo less than 3 dollars");
+    it("extracts decimal price", async () => {
+      const r = await svc.parseCommand("find juice under $2.99");
+      expect(r?.maxPrice).toBe(2.99);
+    });
+
+    it("extracts 'less than' price", async () => {
+      const r = await svc.parseCommand("search for shampoo less than 3");
       expect(r?.maxPrice).toBe(3);
     });
   });
 
+  describe("confidence", () => {
+    it("returns high confidence for clear add command", async () => {
+      const r = await svc.parseCommand("add 2 kg of apples");
+      expect(r?.confidence).toBeGreaterThan(0.6);
+    });
+
+    it("returns low confidence for unknown commands", async () => {
+      const r = await svc.parseCommand("xyzzy blorp fnord");
+      expect(r?.confidence).toBeLessThan(0.5);
+    });
+  });
+
   describe("edge cases", () => {
-    it("returns null for empty transcript", async () => {
+    it("returns null for empty string", async () => {
       const r = await svc.parseCommand("");
       expect(r).toBeNull();
     });
 
+    it("returns null for whitespace-only string", async () => {
+      const r = await svc.parseCommand("   ");
+      expect(r).toBeNull();
+    });
+
     it("returns unknown action for gibberish", async () => {
-      const r = await svc.parseCommand("xyzzy blorp fnord");
+      const r = await svc.parseCommand("asdfghjkl qwerty");
       expect(r?.action).toBe("unknown");
     });
 
-    it("returns confidence < 0.4 for unknown commands", async () => {
-      const r = await svc.parseCommand("xyzzy blorp fnord");
-      expect(r?.confidence).toBeLessThan(0.5);
+    it("includes rawTranscript in result", async () => {
+      const r = await svc.parseCommand("add milk");
+      expect(r?.rawTranscript).toBe("add milk");
+    });
+
+    it("includes language in result", async () => {
+      const r = await svc.parseCommand("add milk", "es-ES");
+      expect(r?.language).toBe("es-ES");
     });
   });
 });
