@@ -2,16 +2,18 @@ import mongoose from "mongoose";
 import { env } from "./env";
 import { logger } from "../utils/logger";
 
+// Ensure all schemas are registered at startup
+import "../models/index";
+
 /**
  * Connects to MongoDB Atlas using Mongoose.
- * Retries once on failure then exits the process.
+ * Exits the process on failure — we treat DB unavailability as fatal.
  */
 export async function connectDB(): Promise<void> {
   try {
     mongoose.set("strictQuery", true);
 
     await mongoose.connect(env.MONGODB_URI, {
-      // Connection pool settings suited for a small API server
       maxPoolSize: 10,
       serverSelectionTimeoutMS: 5000,
       socketTimeoutMS: 45000,
@@ -24,17 +26,16 @@ export async function connectDB(): Promise<void> {
   }
 }
 
-// Graceful disconnect helper (used in tests and SIGTERM handler)
+/** Graceful disconnect — used in tests and SIGTERM handler */
 export async function disconnectDB(): Promise<void> {
   await mongoose.disconnect();
   logger.info("MongoDB disconnected");
 }
 
-// Mongoose connection events
 mongoose.connection.on("disconnected", () => {
-  logger.warn("MongoDB disconnected");
+  logger.warn("MongoDB disconnected unexpectedly");
 });
 
 mongoose.connection.on("error", (err) => {
-  logger.error("MongoDB error:", err);
+  logger.error("MongoDB runtime error:", err);
 });

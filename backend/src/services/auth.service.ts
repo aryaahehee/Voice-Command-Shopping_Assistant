@@ -2,13 +2,15 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { env } from "../config/env";
 import { JwtPayload } from "../types";
+import { User, RefreshToken } from "../models/index";
+import type { IUser } from "../models/index";
 
 /**
- * AuthService — handles registration, login, token management.
- * Mongoose model integration is wired in Milestone 4.
+ * AuthService — registration, login, token management.
+ * Uses the User and RefreshToken Mongoose models.
  */
 export class AuthService {
-  // ── Token helpers ────────────────────────────────────────
+  // ── Token generation ─────────────────────────────────────
 
   generateAccessToken(userId: string, email: string): string {
     return jwt.sign(
@@ -26,48 +28,151 @@ export class AuthService {
     );
   }
 
-  async hashPassword(password: string): Promise<string> {
-    return bcrypt.hash(password, 12);
+  // ── User lookups ─────────────────────────────────────────
+
+  async findByEmail(email: string): Promise<IUser | null> {
+    return User.findByEmail(email);
   }
 
-  async comparePassword(plain: string, hash: string): Promise<boolean> {
-    return bcrypt.compare(plain, hash);
+  async findById(id: string): Promise<Omit<IUser, "password" | "refreshTokens"> | null> {
+    const user = await User.findById(id).select("-password -refreshTokens");
+    return user;
   }
 
-  // ── User operations (stubs — connected to DB in M4) ─────
+  // ── Registration ─────────────────────────────────────────
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  async findByEmail(_email: string): Promise<null> {
-    // TODO: replaced in M4 with User.findOne({ email })
-    return null;
+  async register(input: { name: string; email: string; password: string }) {
+    const user = await User.create(input);
+
+    const accessToken = this.generateAccessToken(
+      user._id.toString(),
+      user.email
+    );
+    const rawRefreshToken = this.generateRefreshToken(
+      user._id.toString(),
+      user.email
+    );
+
+    await this.storeRefreshToken(user._id.toString(), rawRefreshToken);
+
+    return {
+      user: user.toSafeObject(),
+      accessToken,
+      refreshToken: rawRefreshToken,
+    };
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  async findById(_id: string): Promise<null> {
-    // TODO: replaced in M4 with User.findById(id)
-    return null;
+  // ── Login ─────────────────────────────────────────────────
+
+  async login(email: string, password: string) {
+    // Must explicitly select password since it's excluded by default
+    const user = await User.findOne({ email }).select("+password");
+    if (!user || !user.isActive) return null;
+
+    const passwordMatch = await user.comparePassword(password);
+    if (!passwordMatch) return null;
+
+    // Update last login time
+    user.lastLoginAt = new Date();
+    await user.save();
+
+    const accessToken = this.generateAccessToken(
+      user._id.toString(),
+      user.email
+    );
+    const rawRefreshToken = this.generateRefreshToken(
+      user._id.toString(),
+      user.email
+    );
+
+    await this.storeRefreshToken(user._id.toString(), rawRefreshToken);
+
+    return {
+      user: user.toSafeObject(),
+      accessToken,
+      refreshToken: rawRefreshToken,
+    };
   }
 
-  async register(_input: { name: string; email: string; password: string }) {
-    // TODO: full implementation in M4
-    throw new Error("DB not yet connected — implement in Milestone 4");
+  // ── Refresh token management ──────────────────────────────
+
+  private async storeRefreshToken(
+    userId: string,
+    rawToken: string
+  ): Promise<void> {
+    const tokenHash = await bcrypt.hash(rawToken, 10);
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+
+    await RefreshToken.create({ userId, tokenHash, expiresAt });
   }
 
-  async login(
-    _email: string,
-    _password: string
-  ): Promise<null> {
-    // TODO: full implementation in M4
-    return null;
+  async refreshAccessToken(
+    rawToken: string
+  ): Promise<{ accessToken: string } | null> {
+    try {
+      const payload = jwt.verify(
+        rawToken,
+        env.JWT_REFRESH_SECRET
+      ) as JwtPayload;
+
+      // Find all valid (non-revoked, non-expired) tokens for this user
+      const storedTokens = await RefreshToken.find({
+        userId: payload.userId,
+        isRevoked: false,
+        expiresAt: { $gt: new Date() },
+      });
+
+      // Compare raw token against stored hashes
+      let validRecord = null;
+      for (const record of storedTokens) {
+        const match = await bcrypt.compare(rawToken, record.tokenHash);
+        if (match) { validRecord = record; break; }
+      }
+
+      if (!validRecord) return null;
+
+      // Issue new access token
+      const accessToken = this.generateAccessToken(
+        payload.userId,
+        payload.email
+      );
+
+      return { accessToken };
+    } catch {
+      return null;
+    }
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  async revokeRefreshToken(_token: string): Promise<void> {
-    // TODO: store invalidated tokens in DB (M4)
+  async revokeRefreshToken(rawToken: string): Promise<void> {
+    try {
+      const payload = jwt.verify(
+        rawToken,
+        env.JWT_REFRESH_SECRET
+      ) as JwtPayload;
+
+      const storedTokens = await RefreshToken.find({
+        userId: payload.userId,
+        isRevoked: false,
+      });
+
+      for (const record of storedTokens) {
+        const match = await bcrypt.compare(rawToken, record.tokenHash);
+        if (match) {
+          record.isRevoked = true;
+          await record.save();
+          break;
+        }
+      }
+    } catch {
+      // Token already invalid — nothing to do
+    }
   }
 
-  async refreshAccessToken(_token: string): Promise<null> {
-    // TODO: verify against DB refresh tokens (M4)
-    return null;
+  /** Revoke ALL refresh tokens for a user (e.g. on password change) */
+  async revokeAllRefreshTokens(userId: string): Promise<void> {
+    await RefreshToken.updateMany(
+      { userId, isRevoked: false },
+      { $set: { isRevoked: true } }
+    );
   }
 }

@@ -1,6 +1,6 @@
+import { PurchaseHistory } from "../models/index";
 import { logger } from "../utils/logger";
 
-// Seasonal items by month index (0 = January)
 const SEASONAL_MONTHS: Record<number, string[]> = {
   0:  ["oranges", "grapefruit", "kale", "sweet potatoes"],
   1:  ["blood oranges", "leeks", "Brussels sprouts"],
@@ -16,7 +16,6 @@ const SEASONAL_MONTHS: Record<number, string[]> = {
   11: ["clementines", "pomelo", "chestnuts"],
 };
 
-// Common substitute map
 const SUBSTITUTES: Record<string, string[]> = {
   milk:    ["almond milk", "oat milk", "soy milk", "coconut milk"],
   butter:  ["margarine", "coconut oil", "olive oil", "ghee"],
@@ -30,33 +29,39 @@ const SUBSTITUTES: Record<string, string[]> = {
   bread:   ["rice cakes", "corn tortillas", "lettuce wraps"],
 };
 
-// Staple items shown when history is empty
 const STAPLES = [
   "milk", "eggs", "bread", "butter", "bananas",
   "apples", "chicken", "rice", "pasta", "tomatoes",
 ];
 
-/**
- * RecommendationService
- * Personalised, seasonal, and substitute suggestions.
- * Full history-based logic is wired up in Milestone 9.
- */
 export class RecommendationService {
   /**
-   * Personalised recommendations based on purchase history.
-   * Falls back to staple suggestions until M9 history data is available.
+   * Personalised recommendations — uses real purchase history
+   * and falls back to staples for new users.
    */
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  async getPersonalised(_userId: string) {
+  async getPersonalised(userId: string) {
     try {
-      // TODO: query PurchaseHistory model in M9 and rank by frequency
+      const frequent = await PurchaseHistory.getFrequentItems(userId, 10);
+
+      if (frequent.length > 0) {
+        return frequent.map((item, i) => ({
+          id: `hist-${i}`,
+          itemName: item.itemName,
+          category: item.category,
+          reason: `Purchased ${item.count} time${item.count > 1 ? "s" : ""}`,
+          source: "history" as const,
+          confidence: Math.min(0.95, 0.5 + item.count * 0.05),
+        }));
+      }
+
+      // New user — return staples
       return STAPLES.map((name, i) => ({
         id: `staple-${i}`,
         itemName: name,
-        category: "other",
-        reason: "Frequently purchased staple",
-        source: "history",
-        confidence: 0.9 - i * 0.05,
+        category: "other" as const,
+        reason: "Popular staple item",
+        source: "history" as const,
+        confidence: 0.7,
       }));
     } catch (error) {
       logger.error("getPersonalised error:", error);
@@ -64,9 +69,6 @@ export class RecommendationService {
     }
   }
 
-  /**
-   * Seasonal suggestions based on the current calendar month.
-   */
   async getSeasonal() {
     try {
       const month = new Date().getMonth();
@@ -74,9 +76,9 @@ export class RecommendationService {
       return items.map((name, i) => ({
         id: `seasonal-${i}`,
         itemName: name,
-        category: "produce",
+        category: "produce" as const,
         reason: "In season right now",
-        source: "seasonal",
+        source: "seasonal" as const,
         confidence: 0.85,
       }));
     } catch (error) {
@@ -85,9 +87,6 @@ export class RecommendationService {
     }
   }
 
-  /**
-   * Returns substitute options for a given item name.
-   */
   async getSubstitutes(itemName: string) {
     try {
       const key = itemName.toLowerCase().trim();
@@ -97,10 +96,10 @@ export class RecommendationService {
         substitutes: subs.map((name, i) => ({
           id: `sub-${i}`,
           itemName: name,
-          category: "other",
+          category: "other" as const,
           reason: `Alternative to ${itemName}`,
-          source: "substitute",
-          confidence: 0.8 - i * 0.05,
+          source: "substitute" as const,
+          confidence: Math.max(0.5, 0.85 - i * 0.08),
         })),
       };
     } catch (error) {
