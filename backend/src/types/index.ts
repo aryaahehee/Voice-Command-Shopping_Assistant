@@ -64,6 +64,7 @@ export interface ParsedVoiceCommand {
   brand?: string;
   rawTranscript: string;
   confidence: number;
+  language?: string;
 }
 
 // JWT payload stored in tokens

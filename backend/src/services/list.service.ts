@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 import { ShoppingList, PurchaseHistory, detectCategory } from "../models/index";
-import type { IShoppingList, IShoppingItem } from "../models/index";
+import type { IShoppingItem } from "../models/index";
 import { ItemUnit, ItemCategory } from "../types";
 
 export interface AddItemInput {
@@ -15,26 +15,35 @@ export interface AddItemInput {
 }
 
 /**
+ * Plain shopping list shape returned from lean() queries.
+ * Using `unknown` casts avoids fighting Mongoose's complex FlattenMaps types
+ * while keeping runtime behaviour identical.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type LeanList = any;
+
+/**
  * ListService — full CRUD for shopping lists and their items.
  * Records purchases to PurchaseHistory on item check-off.
  */
 export class ListService {
   // ── Lists ────────────────────────────────────────────────
 
-  async getListsByUser(userId: string): Promise<IShoppingList[]> {
+  async getListsByUser(userId: string): Promise<LeanList[]> {
     return ShoppingList.find({ userId })
       .sort({ isActive: -1, updatedAt: -1 })
       .lean({ virtuals: true });
   }
 
-  async createList(userId: string, name: string): Promise<IShoppingList> {
-    return ShoppingList.create({ userId, name });
+  async createList(userId: string, name: string): Promise<LeanList> {
+    const doc = await ShoppingList.create({ userId, name });
+    return doc.toObject({ virtuals: true });
   }
 
   async getListById(
     id: string,
     userId: string
-  ): Promise<IShoppingList | null> {
+  ): Promise<LeanList | null> {
     if (!mongoose.isValidObjectId(id)) return null;
     return ShoppingList.findOne({ _id: id, userId }).lean({ virtuals: true });
   }
@@ -43,7 +52,7 @@ export class ListService {
     id: string,
     userId: string,
     updates: { name?: string; isActive?: boolean }
-  ): Promise<IShoppingList | null> {
+  ): Promise<LeanList | null> {
     if (!mongoose.isValidObjectId(id)) return null;
     return ShoppingList.findOneAndUpdate(
       { _id: id, userId },
@@ -64,10 +73,9 @@ export class ListService {
     listId: string,
     userId: string,
     itemData: AddItemInput
-  ): Promise<IShoppingList | null> {
+  ): Promise<LeanList | null> {
     if (!mongoose.isValidObjectId(listId)) return null;
 
-    // Auto-detect category if not provided
     const category: ItemCategory =
       itemData.category ?? detectCategory(itemData.name);
 
@@ -96,11 +104,10 @@ export class ListService {
     itemId: string,
     userId: string,
     updates: Partial<AddItemInput & { checked: boolean }>
-  ): Promise<IShoppingList | null> {
+  ): Promise<LeanList | null> {
     if (!mongoose.isValidObjectId(listId) || !mongoose.isValidObjectId(itemId))
       return null;
 
-    // Build positional update object
     const setFields: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(updates)) {
       if (value !== undefined) {
@@ -119,17 +126,13 @@ export class ListService {
     listId: string,
     itemId: string,
     userId: string
-  ): Promise<IShoppingList | null> {
+  ): Promise<LeanList | null> {
     if (!mongoose.isValidObjectId(listId) || !mongoose.isValidObjectId(itemId))
       return null;
 
     return ShoppingList.findOneAndUpdate(
       { _id: listId, userId },
-      {
-        $pull: {
-          items: { _id: new mongoose.Types.ObjectId(itemId) },
-        },
-      },
+      { $pull: { items: { _id: new mongoose.Types.ObjectId(itemId) } } },
       { new: true }
     ).lean({ virtuals: true });
   }
@@ -138,11 +141,11 @@ export class ListService {
     listId: string,
     itemId: string,
     userId: string
-  ): Promise<IShoppingList | null> {
+  ): Promise<LeanList | null> {
     if (!mongoose.isValidObjectId(listId) || !mongoose.isValidObjectId(itemId))
       return null;
 
-    // First, fetch the current checked state of the item
+    // Fetch current checked state without lean so we can use .items.id()
     const list = await ShoppingList.findOne({
       _id: listId,
       userId,
@@ -151,7 +154,9 @@ export class ListService {
 
     if (!list) return null;
 
-    const item = list.items.id(itemId) as (IShoppingItem & { _id: mongoose.Types.ObjectId }) | null;
+    const item = list.items.id(itemId) as
+      | (IShoppingItem & { _id: mongoose.Types.ObjectId })
+      | null;
     if (!item) return null;
 
     const newChecked = !item.checked;
@@ -162,7 +167,7 @@ export class ListService {
       { new: true }
     ).lean({ virtuals: true });
 
-    // Record to purchase history when an item is checked off
+    // Record to purchase history when item is checked off
     if (newChecked && updated) {
       await PurchaseHistory.create({
         userId,

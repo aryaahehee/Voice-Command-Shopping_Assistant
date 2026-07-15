@@ -36,7 +36,7 @@ export const getSeasonalSuggestions = asyncHandler(
  */
 export const getSubstitutes = asyncHandler(
   async (req: AuthRequest, res: Response) => {
-    const substitutes = await recService.getSubstitutes(req.params.item);
+    const substitutes = await recService.getSubstitutes(req.params.item as string);
     sendSuccess(res, substitutes, "Substitutes fetched");
   }
 );

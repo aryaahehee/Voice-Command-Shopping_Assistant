@@ -5,7 +5,6 @@ import {
   sendSuccess,
   sendCreated,
   sendNotFound,
-  sendForbidden,
 } from "../utils/apiResponse";
 import { ListService } from "../services/list.service";
 
@@ -34,7 +33,7 @@ export const createList = asyncHandler(
 export const getList = asyncHandler(
   async (req: AuthRequest, res: Response) => {
     const list = await listService.getListById(
-      req.params.id,
+      req.params.id as string,
       req.user!._id.toString()
     );
     if (!list) { sendNotFound(res, "List not found"); return; }
@@ -46,7 +45,7 @@ export const getList = asyncHandler(
 export const updateList = asyncHandler(
   async (req: AuthRequest, res: Response) => {
     const list = await listService.updateList(
-      req.params.id,
+      req.params.id as string,
       req.user!._id.toString(),
       req.body as { name?: string; isActive?: boolean }
     );
@@ -59,7 +58,7 @@ export const updateList = asyncHandler(
 export const deleteList = asyncHandler(
   async (req: AuthRequest, res: Response) => {
     const deleted = await listService.deleteList(
-      req.params.id,
+      req.params.id as string,
       req.user!._id.toString()
     );
     if (!deleted) { sendNotFound(res, "List not found"); return; }
@@ -71,7 +70,7 @@ export const deleteList = asyncHandler(
 export const addItem = asyncHandler(
   async (req: AuthRequest, res: Response) => {
     const list = await listService.addItem(
-      req.params.id,
+      req.params.id as string,
       req.user!._id.toString(),
       req.body
     );
@@ -84,8 +83,8 @@ export const addItem = asyncHandler(
 export const updateItem = asyncHandler(
   async (req: AuthRequest, res: Response) => {
     const list = await listService.updateItem(
-      req.params.id,
-      req.params.itemId,
+      req.params.id as string,
+      req.params.itemId as string,
       req.user!._id.toString(),
       req.body
     );
@@ -98,8 +97,8 @@ export const updateItem = asyncHandler(
 export const deleteItem = asyncHandler(
   async (req: AuthRequest, res: Response) => {
     const list = await listService.removeItem(
-      req.params.id,
-      req.params.itemId,
+      req.params.id as string,
+      req.params.itemId as string,
       req.user!._id.toString()
     );
     if (!list) { sendNotFound(res, "List or item not found"); return; }
@@ -111,8 +110,8 @@ export const deleteItem = asyncHandler(
 export const toggleItem = asyncHandler(
   async (req: AuthRequest, res: Response) => {
     const list = await listService.toggleItem(
-      req.params.id,
-      req.params.itemId,
+      req.params.id as string,
+      req.params.itemId as string,
       req.user!._id.toString()
     );
     if (!list) { sendNotFound(res, "List or item not found"); return; }
